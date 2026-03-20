@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
+    "@google/generative-ai": "^0.24.1",
     "@types/uuid": "^10.0.0",
     "axios": "^1.13.6",
     "cheerio": "^1.2.0",

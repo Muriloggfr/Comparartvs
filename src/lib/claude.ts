@@ -1,44 +1,38 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { TV, TVSpecs, TVReview, TVPrice, RankingEntry, ComparisonResult } from './types';
+import { GoogleGenerativeAI, Part } from '@google/generative-ai';
+import { TV, TVSpecs, TVReview, ComparisonResult } from './types';
 import { ScrapedProduct } from './scraper';
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-const MODEL = 'claude-sonnet-4-6';
+// Use gemini-1.5-flash (free tier: 15 req/min, 1M tokens/day)
+const MODEL = 'gemini-1.5-flash';
+
+async function generateText(prompt: string): Promise<string> {
+  const model = genAI.getGenerativeModel({ model: MODEL });
+  const result = await model.generateContent(prompt);
+  return result.response.text().trim();
+}
+
+async function generateWithImage(imageBase64: string, mimeType: string, prompt: string): Promise<string> {
+  const model = genAI.getGenerativeModel({ model: MODEL });
+  const imagePart: Part = {
+    inlineData: { data: imageBase64, mimeType: mimeType as 'image/jpeg' | 'image/png' | 'image/webp' },
+  };
+  const result = await model.generateContent([imagePart, prompt]);
+  return result.response.text().trim();
+}
 
 // Recognize TV model from photo (base64 image)
 export async function recognizeTVFromImage(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<string> {
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 256,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
-              data: imageBase64,
-            },
-          },
-          {
-            type: 'text',
-            text: 'This is a photo of a TV box or TV product. Extract the exact TV model name and brand from this image. Return ONLY the model name in the format: "Brand ModelNumber" (e.g., "Samsung QN55Q80C" or "LG OLED55C3"). If you cannot identify the model, return "UNKNOWN".',
-          },
-        ],
-      },
-    ],
-  });
-
-  const text = response.content[0].type === 'text' ? response.content[0].text.trim() : 'UNKNOWN';
-  return text;
+  const text = await generateWithImage(
+    imageBase64,
+    mimeType,
+    'This is a photo of a TV box or TV product. Extract the exact TV model name and brand from this image. Return ONLY the model name in the format: "Brand ModelNumber" (e.g., "Samsung QN55Q80C" or "LG OLED55C3"). If you cannot identify the model, return "UNKNOWN".'
+  );
+  return text || 'UNKNOWN';
 }
 
-// Extract structured TV specs from scraped data using Claude
+// Extract structured TV specs from scraped data using Gemini
 export async function extractTVSpecs(scrapedData: ScrapedProduct, modelName?: string): Promise<{
   brand: string;
   model: string;
@@ -59,7 +53,7 @@ Extract and return a JSON object with this exact structure:
   "specs": {
     "screenTechnology": "OLED/QLED/LED/Mini-LED/Neo QLED/WOLED/etc.",
     "resolution": "4K/8K/Full HD/HD",
-    "screenSize": "size in inches (e.g., 55\")",
+    "screenSize": "size in inches (e.g., 55\\")",
     "refreshRate": "refresh rate (e.g., 120Hz)",
     "hdr": ["list of HDR formats supported, e.g., HDR10, Dolby Vision, HLG"],
     "smartTV": "smart TV platform (webOS, Tizen, Google TV, Android TV, etc.)",
@@ -74,15 +68,9 @@ Extract and return a JSON object with this exact structure:
   }
 }
 
-Return ONLY the JSON, no explanation.`;
+Return ONLY the JSON, no explanation, no markdown code blocks.`;
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '{}';
+  const text = await generateText(prompt);
 
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -112,24 +100,18 @@ Return a JSON array of up to 3 review summaries in this format:
   {
     "source": "site name",
     "score": score out of 10 (number or null if not rated),
-    "summary": "2-3 sentence summary of the review",
-    "pros": ["pro 1", "pro 2", "pro 3"],
-    "cons": ["con 1", "con 2"],
-    "url": "approximate URL or empty string"
+    "summary": "2-3 sentence summary of the review in Portuguese",
+    "pros": ["pro 1 in Portuguese", "pro 2", "pro 3"],
+    "cons": ["con 1 in Portuguese", "con 2"],
+    "url": ""
   }
 ]
 
-If you don't have specific review data for this model, create reasonable reviews based on what you know about this TV's technology and typical reception. Always base on real technical knowledge.
+If you don't have specific review data for this model, create reasonable reviews based on what you know about this TV's technology and typical reception. Always base on real technical knowledge. Write in Portuguese (pt-BR).
 
-Return ONLY the JSON array.`;
+Return ONLY the JSON array, no markdown, no explanation.`;
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1500,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '[]';
+  const text = await generateText(prompt);
 
   try {
     const jsonMatch = text.match(/\[[\s\S]*\]/);
@@ -154,7 +136,7 @@ export async function generateComparison(tvs: TV[]): Promise<ComparisonResult> {
     reviews: tv.reviews.map(r => ({ source: r.source, score: r.score, pros: r.pros, cons: r.cons })),
   }));
 
-  const prompt = `You are a professional TV comparison expert. Analyze these TVs and create a comprehensive ranking and comparison.
+  const prompt = `You are a professional TV comparison expert. Analyze these TVs and create a comprehensive ranking and comparison. Write everything in Portuguese (pt-BR).
 
 TVs to compare:
 ${JSON.stringify(tvSummaries, null, 2)}
@@ -174,26 +156,20 @@ Return a JSON object with this structure:
       "position": 1,
       "tvId": "tv id",
       "tvName": "full name",
-      "score": overall score 0-10 (number),
-      "highlights": ["top strength 1", "top strength 2", "top strength 3"],
-      "weaknesses": ["main weakness 1", "main weakness 2"],
-      "verdict": "2-3 sentence verdict",
-      "bestFor": "who this TV is best for (e.g., gamers, cinephiles, casual viewers)"
+      "score": overall score 0-10 (number with one decimal),
+      "highlights": ["top strength 1 in PT-BR", "top strength 2", "top strength 3"],
+      "weaknesses": ["main weakness 1 in PT-BR", "main weakness 2"],
+      "verdict": "2-3 sentence verdict in PT-BR",
+      "bestFor": "who this TV is best for in PT-BR (e.g., gamers, cinéfilos, uso casual)"
     }
   ],
-  "analysis": "3-4 paragraph comprehensive analysis comparing all TVs across key dimensions",
-  "recommendation": "Clear recommendation paragraph about which TV to buy and why, considering different use cases"
+  "analysis": "3-4 paragraph comprehensive analysis in PT-BR comparing all TVs across key dimensions",
+  "recommendation": "Clear recommendation paragraph in PT-BR about which TV to buy and why, considering different use cases"
 }
 
-Rank from best to worst. Be specific, honest and helpful. Return ONLY the JSON.`;
+Rank from best to worst. Be specific, honest and helpful. Return ONLY the JSON, no markdown code blocks.`;
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 3000,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '{}';
+  const text = await generateText(prompt);
 
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
