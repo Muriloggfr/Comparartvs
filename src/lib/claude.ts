@@ -1,25 +1,41 @@
-import { GoogleGenerativeAI, Part } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import { TV, TVSpecs, TVReview, ComparisonResult } from './types';
 import { ScrapedProduct } from './scraper';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Use gemini-2.0-flash (free tier: 15 req/min, 1M tokens/day)
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'claude-haiku-4-5-20251001';
 
 async function generateText(prompt: string): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: MODEL });
-  const result = await model.generateContent(prompt);
-  return result.response.text().trim();
+  const message = await client.messages.create({
+    model: MODEL,
+    max_tokens: 2048,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const block = message.content[0];
+  return block.type === 'text' ? block.text.trim() : '';
 }
 
 async function generateWithImage(imageBase64: string, mimeType: string, prompt: string): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: MODEL });
-  const imagePart: Part = {
-    inlineData: { data: imageBase64, mimeType: mimeType as 'image/jpeg' | 'image/png' | 'image/webp' },
-  };
-  const result = await model.generateContent([imagePart, prompt]);
-  return result.response.text().trim();
+  const validMimeType = (mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'image/webp' || mimeType === 'image/gif')
+    ? mimeType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
+    : 'image/jpeg';
+
+  const message = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: validMimeType, data: imageBase64 } },
+          { type: 'text', text: prompt },
+        ],
+      },
+    ],
+  });
+  const block = message.content[0];
+  return block.type === 'text' ? block.text.trim() : '';
 }
 
 // Recognize TV model from photo (base64 image)
@@ -32,7 +48,7 @@ export async function recognizeTVFromImage(imageBase64: string, mimeType: string
   return text || 'UNKNOWN';
 }
 
-// Extract structured TV specs from scraped data using Gemini
+// Extract structured TV specs from scraped data
 export async function extractTVSpecs(scrapedData: ScrapedProduct, modelName?: string): Promise<{
   brand: string;
   model: string;
@@ -87,7 +103,7 @@ Return ONLY the JSON, no explanation, no markdown code blocks.`;
   };
 }
 
-// Search and summarize internet reviews for a TV model
+// Search and summarize reviews for a TV model
 export async function searchAndSummarizeReviews(tvFullName: string, brand: string, model: string): Promise<TVReview[]> {
   const prompt = `You are a TV review expert with knowledge of major TV models up to 2025.
 
