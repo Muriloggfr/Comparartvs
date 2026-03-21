@@ -91,10 +91,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, tv });
   } catch (error) {
-    console.error('Error adding TV:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Error adding TV:', message);
     return NextResponse.json({
       success: false,
-      error: 'Erro interno ao processar a TV. Tente novamente.',
+      error: `Erro interno: ${message}`,
     }, { status: 500 });
   }
 }

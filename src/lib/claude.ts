@@ -4,8 +4,8 @@ import { ScrapedProduct } from './scraper';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-// Use gemini-1.5-flash (free tier: 15 req/min, 1M tokens/day)
-const MODEL = 'gemini-1.5-flash';
+// Use gemini-2.0-flash (free tier: 15 req/min, 1M tokens/day)
+const MODEL = 'gemini-2.0-flash';
 
 async function generateText(prompt: string): Promise<string> {
   const model = genAI.getGenerativeModel({ model: MODEL });
